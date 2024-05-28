@@ -1,6 +1,6 @@
 # ArxivBot
 
-![ArxivBot](images/arxibot.webp)
+<img src="images/arxibot.webp" alt="ArxivBot" width="400">
 
 ArxivBot is a Python script that automates the process of staying up-to-date with the latest research in your field. It fetches papers from [arxiv.org](https://arxiv.org), filters them based on your interests, summarizes them using a language model, and sends you a daily email with the results. 
 
