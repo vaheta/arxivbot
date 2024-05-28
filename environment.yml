@@ -1,0 +1,10 @@
+name: arxivbot
+channels:
+  - defaults
+dependencies:
+  - python=3.9
+  - requests
+  - beautifulsoup4
+  - google-generativeai
+  - python-dotenv
+  - PyMuPDF
