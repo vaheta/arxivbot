@@ -134,7 +134,7 @@ def main():
 
         if len(articles) > 0:
             # Iterate over articles to find the relevant ones
-            for article_id, article in enumerate(articles[18:23]):
+            for article_id, article in enumerate(articles):
                 time.sleep(5)
                 logging.info(f"{'*' * 100} Paper ID: {article_id}")
                 try:
