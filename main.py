@@ -113,6 +113,7 @@ def main():
     specific_date = today.strftime('%a, %d %b %Y')
 
     # Initialize logging 
+    os.makedirs("logs", exist_ok=True)
     logfile_path = f"logs/{today.strftime('%d%b%Y')}.log"
     logging.basicConfig(
         level=logging.INFO,
