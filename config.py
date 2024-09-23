@@ -9,12 +9,10 @@ arxiv_section = "cs.CV"
 
 # Prompt texts
 interests = [
-    "NeRFs and Gaussian Splatting for novel view synthesis", 
     "Multimodal vision like RGB+Depth or RGB+Polarization including detection/segmentation/depth and other tasks", 
     "Stereo reconstruction", 
     "6DOF object pose detection",
     "Robotics vision",
-    "Implicit representations and signed distance functions",
     "Human body keypoint detection and pose estimation",
     "Polarization",
     "Single-view depth and multi-view depth",

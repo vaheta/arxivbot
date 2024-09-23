@@ -2,3 +2,5 @@ logs/*
 .env
 *.pdf
 __pycache__
+.vscode
+*.log
