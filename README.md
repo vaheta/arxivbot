@@ -9,7 +9,8 @@ ArxivBot is a Python script that automates the process of staying up-to-date wit
 - Fetches the latest research papers from arxiv.org.
 - Filters papers based on predefined research interests.
 - Uses a language model to generate summaries of relevant papers.
-- Sends an email with the summaries and attached logs.
+- Extracts the teaser figure from relevant papers.
+- Sends an email with the summaries, teaser figures and attached logs.
 - Easy to configure and automate with cron.
 
 ## Prerequisites
@@ -75,8 +76,7 @@ The configuration is managed in the config.py file. The default settings are for
 To run the script, simply execute:
 
 ```sh
-chmod +x runme.sh
-./runme.sh
+python main.py
 ```
 
 The script will fetch the latest papers, filter them, generate summaries, and send an email with the results.
@@ -90,18 +90,31 @@ You can automate the execution of the script using cron jobs.
 
 ### Setting up Cron on Linux and Mac
 
-1. Open your crontab file:
+1. Create a runme.sh script, add there the following content
+
+    ```sh
+    #!/bin/bash
+    source /path/to/your/anaconda/bin/activate arxivbot
+    python /path/to/your/arxivbot/main.py
+    ```
+    Make sure to replace /path/to/your/arxivbot and /path/to/your/anaconda with correct paths. Then run 
+    ```sh
+    chmod +x runme.sh
+    ```
+
+2. Open your crontab file:
 
     ```sh
     crontab -e
     ```
-2. Add a new cron job to run runme.sh at your desired frequency. Here’s how you can set up your cron job to run every day at 9 AM, Monday through Friday:
+3. Add a new cron job to run runme.sh at your desired frequency. Here’s how you can set up your cron job to run every day at 9 AM, Monday through Friday:
     ```sh
     0 9 * * 1-5 /path/to/your/arxivbot/runme.sh
     ```
     Make sure to replace /path/to/your/arxivbot/ with the actual path to your script.
 
 ### Setting up Task Scheduler on Windows
+This was not tested! 
 1. Open Task Scheduler and create a new basic task.
 
 2. Follow the wizard to set the trigger (e.g., daily at a specific time). In the advanced settings, select "Repeat task every" and specify the desired interval (e.g., every day). Under "Days," check "On these days" and select "Weekdays."
@@ -124,6 +137,8 @@ The dependencies are listed in the environment.yml file and include:
 - google-generativeai
 - python-dotenv
 - PyMuPDF
+- numpy
+- opencv
 
 ## Contributing
 Feel free to open issues or submit pull requests for improvements or bug fixes.
