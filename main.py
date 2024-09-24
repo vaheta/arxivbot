@@ -195,8 +195,6 @@ def main():
                 except Exception as e:
                     logging.error(f"Failed to process the article: {e}")
 
-                break
-
         else:
             logging.info(f"No articles found for {specific_date}")
 
