@@ -9,14 +9,11 @@ arxiv_section = "cs.CV"
 
 # Prompt texts
 interests = [
-    "Multimodal vision like RGB+Depth or RGB+Polarization including detection/segmentation/depth and other tasks", 
     "Stereo reconstruction", 
-    "6DOF object pose detection",
-    "Robotics vision",
-    "Human body keypoint detection and pose estimation",
+    "6DOF object pose estimation",
+    "Vision for robotics, VLA models",
     "Polarization",
     "Single-view depth and multi-view depth",
-    "Transparent object detection/segmentation or depth estimation"
 ]
 
 prompt_interests_check = (
@@ -42,7 +39,7 @@ email_username = os.getenv("EMAIL_USERNAME")
 email_password = os.getenv("EMAIL_PASSWORD")
 
 # Gemini LLM configuration
-model_name = "gemini-1.5-flash"
+model_name = "gemini-2.0-flash"
 genai_api_token = os.getenv("GENAI_API_TOKEN")
 generation_config = {
   "temperature": 1,

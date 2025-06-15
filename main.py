@@ -174,7 +174,7 @@ def main():
             teaser_figures = []
             # Iterate over articles to find the relevant ones
             for article_id, article in enumerate(articles):
-                time.sleep(5)
+                time.sleep(10)
                 logging.info(f"{'*' * 100} Paper ID: {article_id}")
                 try:
                     title, pdf_url, is_relevant, response_text, article_text, teaser_figure = process_article(llm, article)
