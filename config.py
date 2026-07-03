@@ -4,65 +4,145 @@ import os
 # Load environment variables from .env file
 load_dotenv()
 
+# ---------------------------------------------------------------------------
+# arXiv settings
+# ---------------------------------------------------------------------------
+
 # arXiv.org section for parsing. Default is Computer Vision and Pattern Recognition
 arxiv_section = "cs.CV"
 
-# Prompt texts
+# Politeness delay between consecutive requests to arxiv.org (seconds).
+# arXiv asks automated clients to keep at least 3 seconds between API calls.
+arxiv_request_delay = 3.0
+
+# Maximum number of characters of PDF text sent to the summarizer.
+# Keeps token usage bounded for very long papers (appendices, references, ...).
+max_pdf_chars = 60_000
+
+# ---------------------------------------------------------------------------
+# Research interests
+# ---------------------------------------------------------------------------
+# Each interest has a short topic name and a description that tells the
+# classifier what does (and does not) belong to it. Be as concrete as you can:
+# the classifier only sees the title and abstract of each paper.
+
 interests = [
-    "Stereo reconstruction", 
-    "6DOF object pose estimation",
-    "Vision for robotics, VLA models",
-    "Polarization",
-    "Single-view depth and multi-view depth",
+    {
+        "topic": "Stereo reconstruction",
+        "description": (
+            "Stereo matching and disparity estimation, multi-view stereo, "
+            "active or event-based stereo, stereo benchmarks and datasets."
+        ),
+    },
+    {
+        "topic": "6DOF object pose estimation",
+        "description": (
+            "Instance- or category-level 6D object pose estimation and tracking, "
+            "CAD/model-based or model-free pose, pose refinement, novel-object pose, "
+            "object pose for grasping and manipulation."
+        ),
+    },
+    {
+        "topic": "Vision for robotics and VLA models",
+        "description": (
+            "Vision-language-action (VLA) models, robot manipulation policies learned "
+            "from visual input, imitation or reinforcement learning for manipulation, "
+            "robot perception for grasping, assembly and bin picking."
+        ),
+    },
+    {
+        "topic": "Polarization imaging",
+        "description": (
+            "Shape from polarization, polarimetric cameras and sensors, polarization "
+            "cues for depth, surface normals, reflectance separation, or perceiving "
+            "transparent and specular objects."
+        ),
+    },
+    {
+        "topic": "Single-view and multi-view depth estimation",
+        "description": (
+            "Monocular depth estimation, multi-view depth, depth foundation models, "
+            "metric depth, depth completion from sparse measurements."
+        ),
+    },
 ]
 
-prompt_interests_check = (
-    "My research interests are: {research_interests}. Does the following research paper fall under any of my research interests? "
-    "Answer with 'Yes' or 'No' without any additional details: {text}"
-)
+# Titles of papers that are good examples of what you WANT to receive.
+# They anchor the classifier; 4-8 well-chosen titles work well.
+relevant_examples = [
+    "FoundationPose: Unified 6D Pose Estimation and Tracking of Novel Objects",
+    "SAM-6D: Segment Anything Model Meets Zero-Shot 6D Object Pose Estimation",
+    "FoundationStereo: Zero-Shot Stereo Matching",
+    "Depth Anything V2",
+    "OpenVLA: An Open-Source Vision-Language-Action Model",
+    "Deep Shape from Polarization: Learning to Estimate Surface Normals",
+]
 
-prompt_summary_request = (
-    "Please send me a summary of the paper. Use HTML formatting (<b> for bold, <i> for italic, <br> for change of line and so on). Don't use markdown formatting. "
-    "In the end add a very short explanation on why you decided that this article is relevant to me."
-)
+# Titles of papers you do NOT want, with a short reason. These teach the
+# classifier where the boundary is (generic computer vision is not enough).
+irrelevant_examples = [
+    ("High-Resolution Image Synthesis with Latent Diffusion Models",
+     "image generation, no 3D perception or robotics contribution"),
+    ("A Survey on Face Recognition under Occlusion",
+     "biometrics, outside all interests"),
+    ("nnU-Net-based Brain Tumor Segmentation in Multimodal MRI",
+     "medical image segmentation, outside all interests"),
+    ("Vision Transformers for Video Action Recognition",
+     "video understanding, outside all interests"),
+    ("Scene Text Detection and Recognition in the Wild",
+     "OCR / document analysis, outside all interests"),
+]
 
-prompt_why_no = (
-    "Explain why no?"
-)
+# ---------------------------------------------------------------------------
+# LLM settings (Gemini)
+# ---------------------------------------------------------------------------
+# Two models are used to stay inside the free tier:
+#  - the classifier runs once per paper (hundreds of calls/day), so it uses the
+#    lightweight model with the highest free-tier daily quota;
+#  - the summarizer runs only for relevant papers (a handful of calls/day), so
+#    it can afford the stronger model.
+# Free-tier quotas as of mid-2026: gemini-3.1-flash-lite ~15 RPM / 1000 RPD,
+# gemini-3.5-flash has lower daily caps. Check https://aistudio.google.com/rate-limit
+# for the live numbers of your project.
 
-# Email configuration
+genai_api_token = os.getenv("GENAI_API_TOKEN")
+
+classifier_model = "gemini-3.1-flash-lite"
+classifier_requests_per_minute = 12  # keep a margin below the 15 RPM free limit
+
+summarizer_model = "gemini-3.5-flash"
+summarizer_requests_per_minute = 8
+
+# Abort the run if this many LLM calls fail in a row (e.g. daily quota
+# exhausted); whatever was classified so far is still emailed.
+max_consecutive_llm_failures = 5
+
+# ---------------------------------------------------------------------------
+# Email settings
+# ---------------------------------------------------------------------------
+
 email_from = os.getenv("EMAIL_FROM")
 email_to = os.getenv("EMAIL_TO")
 email_smtp_server = os.getenv("EMAIL_SMTP_SERVER")
-email_smtp_port = int(os.getenv("EMAIL_SMTP_PORT"))
+email_smtp_port = int(os.getenv("EMAIL_SMTP_PORT") or 587)
 email_username = os.getenv("EMAIL_USERNAME")
 email_password = os.getenv("EMAIL_PASSWORD")
 
-# Gemini LLM configuration
-model_name = "gemini-2.0-flash"
-genai_api_token = os.getenv("GENAI_API_TOKEN")
-generation_config = {
-  "temperature": 1,
-  "top_p": 0.95,
-  "top_k": 64,
-  "max_output_tokens": 4096,
-  "response_mime_type": "text/plain",
-}
-safety_settings = [
-  {
-    "category": "HARM_CATEGORY_HARASSMENT",
-    "threshold": "BLOCK_ONLY_HIGH",
-  },
-  {
-    "category": "HARM_CATEGORY_HATE_SPEECH",
-    "threshold": "BLOCK_ONLY_HIGH",
-  },
-  {
-    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-    "threshold": "BLOCK_ONLY_HIGH",
-  },
-  {
-    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-    "threshold": "BLOCK_ONLY_HIGH",
-  },
-]
+
+def validate(require_email: bool = True) -> None:
+    """Fail fast with a clear message when required settings are missing."""
+    required = {"GENAI_API_TOKEN": genai_api_token}
+    if require_email:
+        required.update({
+            "EMAIL_FROM": email_from,
+            "EMAIL_TO": email_to,
+            "EMAIL_SMTP_SERVER": email_smtp_server,
+            "EMAIL_USERNAME": email_username,
+            "EMAIL_PASSWORD": email_password,
+        })
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise RuntimeError(
+            f"Missing environment variables: {', '.join(missing)}. "
+            "Copy .env_template to .env and fill them in."
+        )
