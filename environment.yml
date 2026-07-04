@@ -9,6 +9,4 @@ dependencies:
   - python-dotenv
   - pymupdf
   - pillow
-  - pip
-  - pip:
-      - google-genai
+  - google-genai

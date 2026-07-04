@@ -173,7 +173,7 @@ The dependencies are listed in the environment.yml file and include:
 - python-dotenv
 - PyMuPDF
 - pillow
-- google-genai (pip)
+- google-genai
 
 ## Contributing
 Feel free to open issues or submit pull requests for improvements or bug fixes.
