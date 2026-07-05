@@ -43,11 +43,34 @@ def summarize_paper(llm: LLMInterface, client: ArxivClient, paper, matched_inter
                        matched_interest=matched_interest, figure_png=figure)
 
 
+def find_followed_author(paper) -> str:
+    """Return the followed author's name if one wrote this paper, else ''."""
+    followed = {name.casefold(): name for name in config.followed_authors}
+    for author in paper.authors:
+        match = followed.get(author.casefold())
+        if match:
+            return match
+    return ""
+
+
 def process_papers(llm: LLMInterface, client: ArxivClient, papers, stats: RunStats):
-    """Classify every paper from its abstract; summarize only the relevant ones."""
+    """Classify every paper from its abstract; summarize only the relevant ones.
+
+    Papers by followed authors bypass the classifier entirely.
+    """
     entries = []
     consecutive_failures = 0
     for idx, paper in enumerate(papers, start=1):
+        author = find_followed_author(paper)
+        if author:
+            stats.scanned += 1
+            stats.relevant += 1
+            logging.info("[%d/%d] YES %s | followed author: %s",
+                         idx, len(papers), paper.title, author)
+            entries.append(summarize_paper(llm, client, paper,
+                                           f"Followed author: {author}", stats))
+            continue
+
         try:
             verdict = llm.classify(paper.title, paper.abstract)
             consecutive_failures = 0
@@ -119,7 +142,7 @@ def main():
                  stats.scanned, stats.relevant, stats.errors)
 
     subject = f"arXiv papers for {date}"
-    body = build_digest(date, entries, stats)
+    body = build_digest(date, entries, stats, inline_images=args.dry_run)
 
     if args.dry_run:
         digest_path = os.path.join(logs_dir, f"digest-{today.strftime('%d%b%Y')}.html")

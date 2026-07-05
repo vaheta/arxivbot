@@ -1,5 +1,6 @@
 """Build and send the daily digest email."""
 
+import base64
 import html
 import logging
 import smtplib
@@ -30,7 +31,14 @@ class RunStats:
     aborted_reason: str = ""
 
 
-def build_digest(date: str, entries: List[DigestEntry], stats: RunStats) -> str:
+def build_digest(date: str, entries: List[DigestEntry], stats: RunStats,
+                 inline_images: bool = False) -> str:
+    """Render the digest HTML.
+
+    Figures are referenced as cid: attachments for emails; with
+    `inline_images` they are embedded as base64 data URIs instead, so the
+    HTML is viewable in a browser (used by --dry-run).
+    """
     parts = [f"<h2>arXiv {html.escape(config.arxiv_section)} papers for {html.escape(date)}</h2>"]
 
     if not entries:
@@ -47,7 +55,11 @@ def build_digest(date: str, entries: List[DigestEntry], stats: RunStats) -> str:
         )
         parts.append(f"<p>{entry.summary_html}</p>")
         if entry.figure_png is not None:
-            parts.append(f"<p><img src='cid:teaser_image_{idx}' alt='Teaser figure'></p>")
+            if inline_images:
+                src = f"data:image/png;base64,{base64.b64encode(entry.figure_png).decode()}"
+            else:
+                src = f"cid:teaser_image_{idx}"
+            parts.append(f"<p><img src='{src}' alt='Teaser figure'></p>")
 
     parts.append("<hr>")
     footer = f"Scanned {stats.scanned} papers, {stats.relevant} relevant, {stats.errors} errors."

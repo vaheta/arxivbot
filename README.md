@@ -81,6 +81,7 @@ This two-stage design keeps the bot fast and inside the Gemini API **free tier**
 The configuration is managed in `config.py`:
 
 - `arxiv_section`: arXiv section to follow (default `cs.CV`).
+- `followed_authors`: papers with any of these authors are added to the digest automatically, skipping the classifier. Names must match how they appear on arXiv (case-insensitive).
 - `interests`: your research interests, each with a `topic` and a `description` that tells the classifier what does and does not belong to it. Be concrete — the classifier only sees titles and abstracts.
 - `relevant_examples` / `irrelevant_examples`: titles of papers you do / don't want to receive. These few-shot examples anchor the classifier; updating them is the most effective way to tune precision.
 - `classifier_model` / `summarizer_model` and their rate limits.

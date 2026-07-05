@@ -20,6 +20,19 @@ arxiv_request_delay = 3.0
 max_pdf_chars = 60_000
 
 # ---------------------------------------------------------------------------
+# Followed authors
+# ---------------------------------------------------------------------------
+# Any paper with one of these names among its authors is added to the digest
+# automatically, without going through the relevance classifier. Names must
+# match how they appear on arXiv (case-insensitive).
+
+followed_authors = [
+    "Kaiming He",
+    "Achuta Kadambi",
+    "Sergey Levine",
+]
+
+# ---------------------------------------------------------------------------
 # Research interests
 # ---------------------------------------------------------------------------
 # Each interest has a short topic name and a description that tells the
@@ -65,6 +78,50 @@ interests = [
             "metric depth, depth completion from sparse measurements."
         ),
     },
+    {
+        "topic": "General 3D reconstruction and feed-forward reconstruction models",
+        "description": (
+            "3D scene reconstruction: structure-from-motion, multi-view stereo "
+            "pipelines, neural scene representations, and especially feed-forward "
+            "reconstruction models that directly predict point maps, depth and "
+            "cameras — VGGT and anything building on it, DUSt3R/MASt3R-style "
+            "approaches, large reconstruction models."
+        ),
+    },
+    {
+        "topic": "Positional encodings for transformers",
+        "description": (
+            "Positional encoding schemes for transformers, both within images "
+            "(2D RoPE, relative position encodings, resolution extrapolation) and "
+            "in 3D (camera ray or camera pose encodings, epipolar or other "
+            "geometry-aware attention biases)."
+        ),
+    },
+    {
+        "topic": "World models",
+        "description": (
+            "World models: action- or camera-conditioned video prediction and "
+            "generation used as learned simulators, interactive world models for "
+            "robotics and embodied agents, controllable scene simulation."
+        ),
+    },
+    {
+        "topic": "High-resolution transformer inference",
+        "description": (
+            "Techniques that make transformers/ViTs efficient at high image "
+            "resolutions: token pruning or merging, tiling and windowed attention, "
+            "sparse or linear attention, multi-scale processing, memory-efficient "
+            "inference for large inputs."
+        ),
+    },
+    {
+        "topic": "Agentic vision",
+        "description": (
+            "Multimodal or vision-language agents that plan, call tools, or act "
+            "(in GUIs, browsers, simulators or the real world), active perception, "
+            "visual reasoning through iterative actions."
+        ),
+    },
 ]
 
 # Titles of papers that are good examples of what you WANT to receive.
@@ -76,6 +133,8 @@ relevant_examples = [
     "Depth Anything V2",
     "OpenVLA: An Open-Source Vision-Language-Action Model",
     "Deep Shape from Polarization: Learning to Estimate Surface Normals",
+    "VGGT: Visual Geometry Grounded Transformer",
+    "Cosmos World Foundation Model Platform for Physical AI",
 ]
 
 # Titles of papers you do NOT want, with a short reason. These teach the
