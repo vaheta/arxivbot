@@ -18,6 +18,7 @@ This two-stage design keeps the bot fast and inside the Gemini API **free tier**
 
 - Fetches the latest research papers from arxiv.org.
 - Filters papers with an LLM classifier tuned by your interests and few-shot examples.
+- Auto-includes papers by authors you follow, bypassing the classifier.
 - Downloads and summarizes only the relevant papers (full PDF text).
 - Extracts a teaser figure from each relevant paper.
 - Sends an email digest with summaries, figures and the attached log.
@@ -100,7 +101,7 @@ python main.py
 Useful flags for testing and tuning:
 
 ```sh
-python main.py --dry-run              # don't send email; write the digest HTML into logs/
+python main.py --dry-run              # don't send email; write the digest HTML into logs/ (viewable in a browser, figures included)
 python main.py --limit 10             # only process the first 10 papers
 python main.py --date 'Thu, 2 Jul 2026'  # process a specific listing day
 ```

@@ -1,5 +1,6 @@
 logs/*
 .env
+.DS_Store
 *.pdf
 __pycache__
 .vscode
