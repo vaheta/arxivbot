@@ -2,10 +2,12 @@
 
 import io
 import logging
+import random
 import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 import fitz
@@ -17,11 +19,16 @@ from urllib3.util.retry import Retry
 
 import config
 
+FEED_URL = "https://rss.arxiv.org/atom/{section}"
 LISTING_URL = "https://arxiv.org/list/{section}/recent?skip=0&show=2000"
 API_URL = "https://export.arxiv.org/api/query"
 API_BATCH_SIZE = 100
 
-ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
+ATOM_NS = {
+    "atom": "http://www.w3.org/2005/Atom",
+    "arxiv": "http://arxiv.org/schemas/atom",
+    "dc": "http://purl.org/dc/elements/1.1/",
+}
 
 TEASER_WIDTH = 500  # px, width of the figure embedded in the email
 MIN_FIGURE_SIZE = (200, 100)  # skip logos, rules and other decorations
@@ -48,6 +55,18 @@ def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
+def _clean_author(name: str) -> str:
+    """Strip TeX accent escapes the feed uses (Fern\\'andez -> Fernandez)."""
+    name = re.sub(r"\\[^A-Za-z]", "", name)      # \' \" \^ ...: keep the letter
+    name = re.sub(r"\\[A-Za-z]+\s*", "", name)   # \v r, \c c ...: drop the macro
+    return _normalize_whitespace(name.replace("{", "").replace("}", ""))
+
+
+def _listing_date(moment: datetime) -> str:
+    """Format a datetime the way arXiv listing headings do: 'Mon, 20 Jul 2026'."""
+    return moment.strftime("%a, %-d %b %Y")
+
+
 class ArxivClient:
     """HTTP client for arxiv.org with retries and a politeness delay."""
 
@@ -69,13 +88,55 @@ class ArxivClient:
             self._last_request_time = time.monotonic()
             if response.status_code in (429, 500, 502, 503, 504) and attempt < attempts:
                 retry_after = response.headers.get("Retry-After", "")
-                delay = int(retry_after) if retry_after.isdigit() else 10 * 2 ** (attempt - 1)
+                # The export API throttles per IP with a long memory; short waits
+                # rarely help, so back off in minutes with jitter to avoid
+                # retrying in lockstep with other clients behind the same NAT.
+                delay = int(retry_after) if retry_after.isdigit() else 30 * 2 ** (attempt - 1)
+                delay = min(delay, 300) * random.uniform(0.75, 1.25)
                 logging.warning("HTTP %d from arxiv (attempt %d/%d), waiting %ds",
-                                response.status_code, attempt, attempts, min(delay, 120))
-                time.sleep(min(delay, 120))
+                                response.status_code, attempt, attempts, delay)
+                time.sleep(delay)
                 continue
             response.raise_for_status()
             return response
+
+    def fetch_papers_from_feed(self, section: str) -> Tuple[str, List[Paper]]:
+        """Fetch the current announcement day from the arXiv Atom feed.
+
+        The feed (rss.arxiv.org) is CDN-served static content, so unlike the
+        export API it does not rate-limit shared/corporate IPs. It carries the
+        full metadata (title, abstract, authors) for one announcement day.
+
+        Returns the feed's announcement day formatted like a listing heading
+        (e.g. 'Mon, 20 Jul 2026') and the papers announced that day. Only new
+        and cross-listed submissions are kept, matching the listing page;
+        replacements are skipped.
+        """
+        response = self._get(FEED_URL.format(section=section))
+        root = ET.fromstring(response.content)
+        feed_date = ""
+        papers = []
+        for entry in root.findall("atom:entry", ATOM_NS):
+            if entry.findtext("arxiv:announce_type", "", ATOM_NS) not in ("new", "cross"):
+                continue
+            published = entry.findtext("atom:published", "", ATOM_NS)
+            if published and not feed_date:
+                # published is midnight US-Eastern of the announcement day
+                feed_date = _listing_date(datetime.fromisoformat(published))
+            entry_id = entry.findtext("atom:id", "", ATOM_NS)  # oai:arXiv.org:2607.16214v1
+            arxiv_id = re.sub(r"v\d+$", "", entry_id.rsplit(":", 1)[-1])
+            if not arxiv_id:
+                continue
+            summary = entry.findtext("atom:summary", "", ATOM_NS)
+            abstract = summary.split("Abstract:", 1)[-1]
+            creators = entry.findtext("dc:creator", "", ATOM_NS)
+            papers.append(Paper(
+                arxiv_id=arxiv_id,
+                title=_normalize_whitespace(entry.findtext("atom:title", "", ATOM_NS)),
+                abstract=_normalize_whitespace(abstract),
+                authors=[_clean_author(a) for a in creators.split(",")] if creators else [],
+            ))
+        return feed_date, papers
 
     def fetch_paper_ids(self, section: str, date: str) -> List[str]:
         """Return the arXiv ids announced on `date` (e.g. 'Fri, 3 Jul 2026')."""

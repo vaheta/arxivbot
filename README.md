@@ -6,11 +6,10 @@ ArxivBot is a Python script that automates the process of staying up-to-date wit
 
 ## How it works
 
-1. Scrapes the arXiv listing page for the section you follow and collects the papers announced on the given day.
-2. Fetches titles and abstracts in bulk from the official arXiv API.
-3. **Classifies every paper from its title + abstract only** using a lightweight Gemini model (`gemini-3.1-flash-lite`), guided by your research interests and example papers.
-4. Only for the papers judged relevant, downloads the PDF, extracts the text and a teaser figure, and generates a summary with a stronger model (`gemini-3.5-flash`).
-5. Sends a single HTML digest email with summaries, figures, links, and the run log attached.
+1. Fetches the day's announcement — ids, titles and abstracts — from the arXiv Atom feed ([rss.arxiv.org](https://rss.arxiv.org)) in a single request. For `--date` runs, or if the feed is unavailable, it falls back to scraping the listing page and querying the export API (which rate-limits aggressively per IP).
+2. **Classifies every paper from its title + abstract only** using a lightweight Gemini model (`gemini-3.5-flash-lite`), guided by your research interests and example papers.
+3. Only for the papers judged relevant, downloads the PDF, extracts the text and a teaser figure, and generates a summary with a stronger model (`gemini-3.6-flash`).
+4. Sends a single HTML digest email with summaries, figures, links, and the run log attached.
 
 This two-stage design keeps the bot fast and inside the Gemini API **free tier**: the high-volume classification goes to the model with the largest free daily quota, while the expensive full-text summarization only runs for the handful of relevant papers.
 

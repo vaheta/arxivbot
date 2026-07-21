@@ -160,17 +160,21 @@ irrelevant_examples = [
 #    lightweight model with the highest free-tier daily quota;
 #  - the summarizer runs only for relevant papers (a handful of calls/day), so
 #    it can afford the stronger model.
-# Free-tier quotas as of mid-2026: gemini-3.1-flash-lite ~15 RPM / 1000 RPD,
-# gemini-3.5-flash has lower daily caps. Check https://aistudio.google.com/rate-limit
-# for the live numbers of your project.
+# Flash-lite models have the highest free-tier quotas (~15 RPM / 1000 RPD);
+# flash models are free with lower daily caps. Check
+# https://aistudio.google.com/rate-limit for the live numbers of your project.
 
 genai_api_token = os.getenv("GENAI_API_TOKEN")
 
-classifier_model = "gemini-3.1-flash-lite"
-classifier_requests_per_minute = 12  # keep a margin below the 15 RPM free limit
+# Requests per minute control the pause between consecutive LLM calls
+# (60 / RPM seconds). The values stay well below the official free-tier
+# limits because actual free-tier capacity is often lower, especially at
+# peak hours; lower them further if you still see 429 errors in the log.
+classifier_model = "gemini-3.5-flash-lite"
+classifier_requests_per_minute = 8  # 7.5 s between calls (official limit: 15 RPM)
 
-summarizer_model = "gemini-3.5-flash"
-summarizer_requests_per_minute = 8
+summarizer_model = "gemini-3.6-flash"
+summarizer_requests_per_minute = 5  # 12 s between calls
 
 # Abort the run if this many LLM calls fail in a row (e.g. daily quota
 # exhausted); whatever was classified so far is still emailed.

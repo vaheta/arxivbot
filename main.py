@@ -125,11 +125,31 @@ def main():
     entries = []
 
     try:
-        ids = client.fetch_paper_ids(config.arxiv_section, date)
-        logging.info("Found %d papers for %s", len(ids), date)
-        papers = client.fetch_metadata(ids)
-        if len(papers) < len(ids):
-            logging.warning("Metadata missing for %d papers", len(ids) - len(papers))
+        papers = None
+        if args.date is None:
+            # Normal daily run: one request to the CDN-served Atom feed gives
+            # ids, titles and abstracts for the whole announcement day.
+            try:
+                feed_date, papers = client.fetch_papers_from_feed(config.arxiv_section)
+                if feed_date == date:
+                    logging.info("Feed: %d papers for %s", len(papers), date)
+                else:
+                    logging.info("Feed announcement day is '%s', not '%s' — "
+                                 "no new papers today", feed_date, date)
+                    papers = []
+            except Exception as e:
+                logging.warning("Feed fetch failed (%s); falling back to listing + API", e)
+                papers = None
+
+        if papers is None:
+            # --date runs and feed failures: scrape the listing page for ids,
+            # then fetch metadata from the export API (rate-limited per IP).
+            ids = client.fetch_paper_ids(config.arxiv_section, date)
+            logging.info("Found %d papers for %s", len(ids), date)
+            papers = client.fetch_metadata(ids)
+            if len(papers) < len(ids):
+                logging.warning("Metadata missing for %d papers", len(ids) - len(papers))
+
         if args.limit:
             papers = papers[:args.limit]
 
