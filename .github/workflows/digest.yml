@@ -1,0 +1,79 @@
+name: Daily arXiv digest
+
+on:
+  schedule:
+    - cron: '17 8 * * 1-5'
+      timezone: America/New_York
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      preview:
+        description: Save an HTML preview instead of sending email
+        type: boolean
+        default: true
+      limit:
+        description: Optional maximum number of papers
+        type: string
+      date:
+        description: "Optional recent arXiv listing date, e.g. Fri, 20 Nov 2026"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: arxivbot-${{ github.event_name == 'push' && 'tests' || 'delivery' }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+
+      - name: Check deployment configuration
+        if: github.event_name == 'push'
+        env:
+          HAS_GEMINI: ${{ secrets.GENAI_API_TOKEN != '' }}
+          HAS_EMAIL: ${{ secrets.EMAIL_FROM != '' && secrets.EMAIL_TO != '' && secrets.EMAIL_SMTP_SERVER != '' && secrets.EMAIL_USERNAME != '' && secrets.EMAIL_PASSWORD != '' }}
+        run: |
+          echo "Gemini key configured: $HAS_GEMINI. SMTP settings complete: $HAS_EMAIL." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the digest
+        if: github.event_name != 'push'
+        env:
+          GENAI_API_TOKEN: ${{ secrets.GENAI_API_TOKEN }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ vars.EMAIL_SMTP_PORT || '587' }}
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          CLASSIFIER_MODEL: ${{ vars.CLASSIFIER_MODEL }}
+          SUMMARIZER_MODEL: ${{ vars.SUMMARIZER_MODEL }}
+          PREVIEW: ${{ inputs.preview }}
+          PAPER_LIMIT: ${{ inputs.limit }}
+          LISTING_DATE: ${{ inputs.date }}
+        run: |
+          args=()
+          if [[ "$PREVIEW" == true ]]; then args+=(--dry-run); fi
+          if [[ -n "$PAPER_LIMIT" ]]; then args+=(--limit "$PAPER_LIMIT"); fi
+          if [[ -n "$LISTING_DATE" ]]; then args+=(--date "$LISTING_DATE"); fi
+          python main.py "${args[@]}"
+
+      - name: Save preview
+        if: ${{ !cancelled() && inputs.preview && hashFiles('logs/digest-*.html') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: arxiv-digest
+          path: logs/digest-*.html
+          retention-days: 7

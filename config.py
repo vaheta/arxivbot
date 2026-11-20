@@ -155,30 +155,17 @@ irrelevant_examples = [
 # ---------------------------------------------------------------------------
 # LLM settings (Gemini)
 # ---------------------------------------------------------------------------
-# Two models are used to stay inside the free tier:
-#  - the classifier runs once per paper (hundreds of calls/day), so it uses the
-#    lightweight model with the highest free-tier daily quota;
-#  - the summarizer runs only for relevant papers (a handful of calls/day), so
-#    it can afford the stronger model.
-# Flash-lite models have the highest free-tier quotas (~15 RPM / 1000 RPD);
-# flash models are free with lower daily caps. Check
-# https://aistudio.google.com/rate-limit for the live numbers of your project.
+# Both defaults offer free-tier text generation. Actual quotas depend on the
+# project. Grouping abstracts reduces RPM and daily request consumption.
+genai_api_token = os.getenv("GENAI_API_TOKEN") or os.getenv("GEMINI_API_KEY")
+classifier_model = os.getenv("CLASSIFIER_MODEL") or "gemini-3.5-flash-lite"
+summarizer_model = os.getenv("SUMMARIZER_MODEL") or "gemini-4-hydrogen"
+classifier_requests_per_minute = 8
+summarizer_requests_per_minute = 5
+classifier_batch_size = 12
 
-genai_api_token = os.getenv("GENAI_API_TOKEN")
-
-# Requests per minute control the pause between consecutive LLM calls
-# (60 / RPM seconds). The values stay well below the official free-tier
-# limits because actual free-tier capacity is often lower, especially at
-# peak hours; lower them further if you still see 429 errors in the log.
-classifier_model = "gemini-3.5-flash-lite"
-classifier_requests_per_minute = 8  # 7.5 s between calls (official limit: 15 RPM)
-
-summarizer_model = "gemini-3.6-flash"
-summarizer_requests_per_minute = 5  # 12 s between calls
-
-# Abort the run if this many LLM calls fail in a row (e.g. daily quota
-# exhausted); whatever was classified so far is still emailed.
-max_consecutive_llm_failures = 5
+# After repeated classifier failures, still include every followed author.
+max_consecutive_llm_failures = 3
 
 # ---------------------------------------------------------------------------
 # Email settings
@@ -207,5 +194,5 @@ def validate(require_email: bool = True) -> None:
     if missing:
         raise RuntimeError(
             f"Missing environment variables: {', '.join(missing)}. "
-            "Copy .env_template to .env and fill them in."
+            "Set them in .env or in the repository's Actions secrets."
         )

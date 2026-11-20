@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-import fitz
+import pymupdf
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -62,9 +62,9 @@ def _clean_author(name: str) -> str:
     return _normalize_whitespace(name.replace("{", "").replace("}", ""))
 
 
-def _listing_date(moment: datetime) -> str:
+def listing_date(moment: datetime) -> str:
     """Format a datetime the way arXiv listing headings do: 'Mon, 20 Jul 2026'."""
-    return moment.strftime("%a, %-d %b %Y")
+    return f"{moment:%a}, {moment.day} {moment:%b %Y}"
 
 
 class ArxivClient:
@@ -75,7 +75,8 @@ class ArxivClient:
         self.session.headers["User-Agent"] = "arxivbot (personal daily digest)"
         # Only retry connection-level failures here; HTTP 429/5xx need waits of
         # tens of seconds on arxiv.org and are handled in _get instead.
-        retry = Retry(total=None, connect=3, read=2, status=0, backoff_factor=1)
+        retry = Retry(total=None, connect=3, read=2, status=0, backoff_factor=1,
+                      respect_retry_after_header=False)
         self.session.mount("https://", HTTPAdapter(max_retries=retry))
         self._last_request_time = 0.0
 
@@ -91,8 +92,12 @@ class ArxivClient:
                 # The export API throttles per IP with a long memory; short waits
                 # rarely help, so back off in minutes with jitter to avoid
                 # retrying in lockstep with other clients behind the same NAT.
-                delay = int(retry_after) if retry_after.isdigit() else 30 * 2 ** (attempt - 1)
-                delay = min(delay, 300) * random.uniform(0.75, 1.25)
+                if retry_after.isdigit():
+                    delay = int(retry_after)
+                    if delay > 300:
+                        response.raise_for_status()
+                else:
+                    delay = min(30 * 2 ** (attempt - 1), 300) * random.uniform(1, 1.25)
                 logging.warning("HTTP %d from arxiv (attempt %d/%d), waiting %ds",
                                 response.status_code, attempt, attempts, delay)
                 time.sleep(delay)
@@ -114,15 +119,17 @@ class ArxivClient:
         """
         response = self._get(FEED_URL.format(section=section))
         root = ET.fromstring(response.content)
+        if root.tag != f"{{{ATOM_NS['atom']}}}feed":
+            raise ValueError("arXiv returned a document other than an Atom feed")
         feed_date = ""
         papers = []
         for entry in root.findall("atom:entry", ATOM_NS):
-            if entry.findtext("arxiv:announce_type", "", ATOM_NS) not in ("new", "cross"):
-                continue
             published = entry.findtext("atom:published", "", ATOM_NS)
             if published and not feed_date:
                 # published is midnight US-Eastern of the announcement day
-                feed_date = _listing_date(datetime.fromisoformat(published))
+                feed_date = listing_date(datetime.fromisoformat(published))
+            if entry.findtext("arxiv:announce_type", "", ATOM_NS) not in ("new", "cross"):
+                continue
             entry_id = entry.findtext("atom:id", "", ATOM_NS)  # oai:arXiv.org:2607.16214v1
             arxiv_id = re.sub(r"v\d+$", "", entry_id.rsplit(":", 1)[-1])
             if not arxiv_id:
@@ -150,6 +157,8 @@ class ArxivClient:
                 break
         if heading is None:
             available = [h3.get_text().strip() for h3 in soup.find_all("h3")]
+            if not available:
+                raise ValueError("Could not find any date headings in the arXiv listing")
             logging.warning("No listing found for '%s'. Available: %s", date, available)
             return []
 
@@ -162,7 +171,9 @@ class ArxivClient:
             link = sibling.find("a", href=re.compile(r"/abs/"))
             if link:
                 ids.append(link["href"].split("/abs/")[-1].strip())
-        return ids
+        if not ids:
+            raise ValueError(f"Found the listing for {date} but could not read its paper IDs")
+        return list(dict.fromkeys(ids))
 
     def fetch_metadata(self, arxiv_ids: List[str]) -> List[Paper]:
         """Fetch title, abstract and authors for the given ids in batches."""
@@ -171,9 +182,8 @@ class ArxivClient:
             batch = arxiv_ids[start:start + API_BATCH_SIZE]
             papers.extend(self._fetch_metadata_batch(batch))
         # The API does not preserve the requested order; restore listing order.
-        order = {arxiv_id: idx for idx, arxiv_id in enumerate(arxiv_ids)}
-        papers.sort(key=lambda p: order.get(p.arxiv_id, len(order)))
-        return papers
+        by_id = {paper.arxiv_id: paper for paper in papers}
+        return [by_id[arxiv_id] for arxiv_id in arxiv_ids if arxiv_id in by_id]
 
     def _fetch_metadata_batch(self, batch: List[str], attempts: int = 3) -> List[Paper]:
         params = {"id_list": ",".join(batch), "max_results": len(batch)}
@@ -216,7 +226,7 @@ class ArxivClient:
 
 def extract_text_and_figure(pdf_bytes: bytes) -> Tuple[str, Optional[bytes]]:
     """Extract the paper text (capped) and a teaser figure as PNG bytes."""
-    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+    with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:
         chunks = []
         total = 0
         for page in doc:
@@ -230,7 +240,7 @@ def extract_text_and_figure(pdf_bytes: bytes) -> Tuple[str, Optional[bytes]]:
     return text, figure
 
 
-def _extract_teaser_figure(doc: "fitz.Document") -> Optional[bytes]:
+def _extract_teaser_figure(doc: "pymupdf.Document") -> Optional[bytes]:
     """Return the first reasonably sized figure as PNG bytes, or None."""
     for page_num in range(min(MAX_FIGURE_PAGES, doc.page_count)):
         for image_info in doc.load_page(page_num).get_images(full=True):

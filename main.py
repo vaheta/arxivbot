@@ -3,9 +3,10 @@ import html
 import logging
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import config
-from arxiv_client import ArxivClient, extract_text_and_figure
+from arxiv_client import ArxivClient, extract_text_and_figure, listing_date
 from emailer import DigestEntry, RunStats, build_digest, send_email
 from LLMs.gemini import Gemini
 from LLMs.llm_interface import LLMError, LLMInterface
@@ -60,42 +61,43 @@ def process_papers(llm: LLMInterface, client: ArxivClient, papers, stats: RunSta
     """
     entries = []
     consecutive_failures = 0
-    for idx, paper in enumerate(papers, start=1):
-        author = find_followed_author(paper)
-        if author:
-            stats.scanned += 1
+    for start in range(0, len(papers), config.classifier_batch_size):
+        batch = papers[start:start + config.classifier_batch_size]
+        authors = [find_followed_author(paper) for paper in batch]
+        candidates = [paper for paper, author in zip(batch, authors) if not author]
+        verdicts = {}
+        if candidates and not stats.aborted_reason:
+            try:
+                results = llm.classify_batch([(p.title, p.abstract) for p in candidates])
+                verdicts = dict(zip((p.arxiv_id for p in candidates), results, strict=True))
+                consecutive_failures = 0
+            except LLMError as e:
+                logging.error("Classification failed for %s: %s",
+                              ", ".join(p.arxiv_id for p in candidates), e)
+                stats.errors += len(candidates)
+                consecutive_failures += 1
+                if consecutive_failures >= config.max_consecutive_llm_failures:
+                    stats.aborted_reason = f"Stopped classification after {consecutive_failures} failed batches"
+                    logging.error(stats.aborted_reason)
+
+        for paper, author in zip(batch, authors):
+            if author:
+                stats.scanned += 1
+                interest = f"Followed author: {author}"
+                logging.info("YES %s | %s", paper.title, interest)
+            else:
+                verdict = verdicts.get(paper.arxiv_id)
+                if verdict is None:
+                    stats.unclassified += 1
+                    continue
+                stats.scanned += 1
+                logging.info("%s %s | %s", "YES" if verdict.is_relevant else "no",
+                             paper.title, verdict.reasoning)
+                if not verdict.is_relevant:
+                    continue
+                interest = verdict.matched_interest
             stats.relevant += 1
-            logging.info("[%d/%d] YES %s | followed author: %s",
-                         idx, len(papers), paper.title, author)
-            entries.append(summarize_paper(llm, client, paper,
-                                           f"Followed author: {author}", stats))
-            continue
-
-        try:
-            verdict = llm.classify(paper.title, paper.abstract)
-            consecutive_failures = 0
-        except LLMError as e:
-            logging.error("[%d/%d] classification failed for %s: %s",
-                          idx, len(papers), paper.arxiv_id, e)
-            stats.errors += 1
-            consecutive_failures += 1
-            if consecutive_failures >= config.max_consecutive_llm_failures:
-                stats.aborted_reason = (
-                    f"{consecutive_failures} LLM calls failed in a row "
-                    f"(quota exhausted?); {len(papers) - idx} papers not scanned."
-                )
-                logging.error(stats.aborted_reason)
-                break
-            continue
-
-        stats.scanned += 1
-        decision = "YES" if verdict.is_relevant else "no "
-        logging.info("[%d/%d] %s %s | %s", idx, len(papers), decision,
-                     paper.title, verdict.reasoning)
-
-        if verdict.is_relevant:
-            stats.relevant += 1
-            entries.append(summarize_paper(llm, client, paper, verdict.matched_interest, stats))
+            entries.append(summarize_paper(llm, client, paper, interest, stats))
     return entries
 
 
@@ -108,8 +110,10 @@ def main():
                         help="Do not send the email; write the digest HTML next to the log instead")
     args = parser.parse_args()
 
-    today = datetime.now()
-    date = args.date or today.strftime("%a, %-d %b %Y")
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be a positive integer")
+    today = datetime.now(ZoneInfo("America/New_York"))
+    date = args.date or listing_date(today)
 
     # Anchor logs next to this script so cron runs don't scatter them around.
     logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
@@ -134,9 +138,8 @@ def main():
                 if feed_date == date:
                     logging.info("Feed: %d papers for %s", len(papers), date)
                 else:
-                    logging.info("Feed announcement day is '%s', not '%s' — "
-                                 "no new papers today", feed_date, date)
-                    papers = []
+                    logging.info("Feed date is %s. Checking the listing for %s.", feed_date, date)
+                    papers = None
             except Exception as e:
                 logging.warning("Feed fetch failed (%s); falling back to listing + API", e)
                 papers = None
@@ -146,9 +149,16 @@ def main():
             # then fetch metadata from the export API (rate-limited per IP).
             ids = client.fetch_paper_ids(config.arxiv_section, date)
             logging.info("Found %d papers for %s", len(ids), date)
+            if args.date and not ids:
+                raise RuntimeError(f"No listing for {date} on the recent submissions page")
+            if args.limit:
+                ids = ids[:args.limit]
             papers = client.fetch_metadata(ids)
-            if len(papers) < len(ids):
-                logging.warning("Metadata missing for %d papers", len(ids) - len(papers))
+            missing = len(ids) - len(papers)
+            if missing:
+                stats.errors += missing
+                stats.unclassified += missing
+                logging.error("Metadata missing for %d papers", missing)
 
         if args.limit:
             papers = papers[:args.limit]
@@ -162,16 +172,20 @@ def main():
                  stats.scanned, stats.relevant, stats.errors)
 
     subject = f"arXiv papers for {date}"
+    if stats.errors or stats.aborted_reason:
+        subject = f"[Incomplete] {subject}"
     body = build_digest(date, entries, stats, inline_images=args.dry_run)
 
     if args.dry_run:
         digest_path = os.path.join(logs_dir, f"digest-{today.strftime('%d%b%Y')}.html")
-        with open(digest_path, "w") as f:
+        with open(digest_path, "w", encoding="utf-8") as f:
             f.write(body)
         logging.info("Dry run: digest written to %s", digest_path)
-    else:
+    elif stats.scanned or not (stats.errors or stats.aborted_reason):
         send_email(subject, body, entries, attachment_path=logfile_path)
+
+    return 1 if stats.errors or stats.aborted_reason else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

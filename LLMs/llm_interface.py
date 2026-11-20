@@ -19,6 +19,10 @@ class LLMInterface(ABC):
     def classify(self, title: str, abstract: str) -> Classification:
         """Decide from title + abstract whether the paper is relevant."""
 
+    def classify_batch(self, papers: list[tuple[str, str]]) -> list[Classification]:
+        """Return verdicts in input order. Providers can group requests."""
+        return [self.classify(title, abstract) for title, abstract in papers]
+
     @abstractmethod
     def summarize(self, title: str, matched_interest: str, paper_text: str) -> str:
         """Produce an HTML summary of a relevant paper."""

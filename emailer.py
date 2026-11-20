@@ -3,7 +3,9 @@
 import base64
 import html
 import logging
+import re
 import smtplib
+import ssl
 from dataclasses import dataclass
 from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
@@ -29,6 +31,15 @@ class RunStats:
     relevant: int = 0
     errors: int = 0
     aborted_reason: str = ""
+    unclassified: int = 0
+
+
+def _summary_html(text: str) -> str:
+    # Paper text and model output can contain arbitrary markup. Preserve only
+    # the three formatting tags requested by the summarizer prompt.
+    parts = re.split(r"(</?(?:b|i)>|<br\s*/?>)", text, flags=re.IGNORECASE)
+    return "".join(part if i % 2 else html.escape(html.unescape(part))
+                   for i, part in enumerate(parts))
 
 
 def build_digest(date: str, entries: List[DigestEntry], stats: RunStats,
@@ -42,18 +53,23 @@ def build_digest(date: str, entries: List[DigestEntry], stats: RunStats,
     parts = [f"<h2>arXiv {html.escape(config.arxiv_section)} papers for {html.escape(date)}</h2>"]
 
     if not entries:
-        parts.append("<p>No relevant papers today.</p>")
+        if stats.aborted_reason or stats.errors:
+            parts.append("<p>The scan was incomplete and found no matches.</p>")
+        elif not stats.scanned:
+            parts.append("<p>No new papers were listed for this date.</p>")
+        else:
+            parts.append("<p>No relevant papers today.</p>")
 
     for idx, entry in enumerate(entries):
         paper = entry.paper
         parts.append("<hr>")
         parts.append(
-            f"<h3><a href='{paper.abs_url}'>{html.escape(paper.title)}</a></h3>"
+            f"<h3><a href='{html.escape(paper.abs_url, quote=True)}'>{html.escape(paper.title)}</a></h3>"
             f"<p><i>{html.escape(', '.join(paper.authors))}</i><br>"
             f"Interest: <b>{html.escape(entry.matched_interest)}</b> &middot; "
-            f"<a href='{paper.pdf_url}'>PDF</a></p>"
+            f"<a href='{html.escape(paper.pdf_url, quote=True)}'>PDF</a></p>"
         )
-        parts.append(f"<p>{entry.summary_html}</p>")
+        parts.append(f"<p>{_summary_html(entry.summary_html)}</p>")
         if entry.figure_png is not None:
             if inline_images:
                 src = f"data:image/png;base64,{base64.b64encode(entry.figure_png).decode()}"
@@ -63,6 +79,8 @@ def build_digest(date: str, entries: List[DigestEntry], stats: RunStats,
 
     parts.append("<hr>")
     footer = f"Scanned {stats.scanned} papers, {stats.relevant} relevant, {stats.errors} errors."
+    if stats.unclassified:
+        footer += f" Unclassified papers: {stats.unclassified}."
     if stats.aborted_reason:
         footer += f" <b>Run aborted early: {html.escape(stats.aborted_reason)}</b>"
     parts.append(f"<p><small>{footer}</small></p>")
@@ -94,8 +112,14 @@ def send_email(subject: str, body_html: str, entries: List[DigestEntry],
         except OSError as e:
             logging.error("Failed to attach log file: %s", e)
 
-    with smtplib.SMTP(config.email_smtp_server, config.email_smtp_port, timeout=60) as server:
-        server.starttls()
+    context = ssl.create_default_context()
+    address = (config.email_smtp_server, config.email_smtp_port)
+    implicit_tls = config.email_smtp_port == 465
+    connection = (smtplib.SMTP_SSL(*address, timeout=60, context=context) if implicit_tls
+                  else smtplib.SMTP(*address, timeout=60))
+    with connection as server:
+        if not implicit_tls:
+            server.starttls(context=context)
         server.login(config.email_username, config.email_password)
         server.sendmail(config.email_from, [config.email_to], msg.as_string())
-    logging.info("Email sent to %s", config.email_to)
+    logging.info("Digest accepted by SMTP server")

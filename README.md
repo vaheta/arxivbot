@@ -7,11 +7,11 @@ ArxivBot is a Python script that automates the process of staying up-to-date wit
 ## How it works
 
 1. Fetches the day's announcement — ids, titles and abstracts — from the arXiv Atom feed ([rss.arxiv.org](https://rss.arxiv.org)) in a single request. For `--date` runs, or if the feed is unavailable, it falls back to scraping the listing page and querying the export API (which rate-limits aggressively per IP).
-2. **Classifies every paper from its title + abstract only** using a lightweight Gemini model (`gemini-3.5-flash-lite`), guided by your research interests and example papers.
-3. Only for the papers judged relevant, downloads the PDF, extracts the text and a teaser figure, and generates a summary with a stronger model (`gemini-3.6-flash`).
+2. **Classifies every paper from its title + abstract only** in groups of up to 12 using `gemini-3.5-flash-lite`, guided by your research interests and example papers.
+3. For relevant papers and followed authors, downloads the PDF, extracts the text and a teaser figure, and generates a summary with a stronger model (`gemini-4-hydrogen`).
 4. Sends a single HTML digest email with summaries, figures, links, and the run log attached.
 
-This two-stage design keeps the bot fast and inside the Gemini API **free tier**: the high-volume classification goes to the model with the largest free daily quota, while the expensive full-text summarization only runs for the handful of relevant papers.
+Both default models have free input and output on the Gemini Developer API free tier. Use a free-tier project to keep inference free. Google sets limits per project and model. Batching reduces classification requests, and only papers selected for the digest use the summarizer. [Gemini pricing](https://aistudio.google.com/docs/pricing) · [Your project quotas](https://aistudio.google.com/rate-limit)
 
 ## Features
 
@@ -22,59 +22,45 @@ This two-stage design keeps the bot fast and inside the Gemini API **free tier**
 - Extracts a teaser figure from each relevant paper.
 - Sends an email digest with summaries, figures and the attached log.
 - Rate-limited and retrying HTTP/LLM clients that respect arXiv and Gemini quotas.
-- Easy to configure and automate with cron.
+- Runs on GitHub Actions or locally with cron.
 
-## Prerequisites
+## Run on GitHub Actions
 
-- Conda (Miniconda or Anaconda)
+The **Daily arXiv digest** workflow runs on GitHub's hosted Linux runner at **8:17 a.m. America/New_York, Monday through Friday**. The runner shuts down after each digest. Standard GitHub-hosted runners are free for this public repository. [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 
-## Installation
+1. In **Settings → Secrets and variables → Actions**, add the following *repository secrets*. A preview needs only the Gemini key. [Repository secrets](https://github.com/vaheta/arxivbot/settings/secrets/actions)
 
-1. **Clone the repository:**
+   | Secret | Value |
+   | --- | --- |
+   | `GENAI_API_TOKEN` | Gemini Developer API key from [Google AI Studio](https://aistudio.google.com/api-keys) |
+   | `EMAIL_FROM` | Sender address authorized by your SMTP provider |
+   | `EMAIL_TO` | Recipient address |
+   | `EMAIL_SMTP_SERVER` | SMTP hostname |
+   | `EMAIL_USERNAME` | SMTP login |
+   | `EMAIL_PASSWORD` | SMTP password or app password. For Mailgun, use the domain's SMTP credentials. |
 
-   ```sh
-   git clone https://github.com/yourusername/arxivbot.git
-   cd arxivbot
-   ```
+2. Port 587 uses STARTTLS. For a provider using implicit TLS, set the repository **variable** `EMAIL_SMTP_PORT` to `465`. Optional variables `CLASSIFIER_MODEL` and `SUMMARIZER_MODEL` override the defaults.
+3. Under **Actions → Daily arXiv digest → Run workflow**, leave **Save an HTML preview** selected and set **limit** to `12` for a small trial. Download the `arxiv-digest` artifact from the run. Preview artifacts expire after seven days and are accessible to readers of the repository. For a weekend preview, enter a recent weekday listing date. [Daily digest workflow](https://github.com/vaheta/arxivbot/actions/workflows/digest.yml)
+4. Scheduled runs email the whole digest. A manual run with preview unchecked also sends it, so repeating a delivery can send a second copy. Pushes to `main` only run the tests and report whether deployment settings are present.
 
-2. **Create and activate the Conda environment:**
+If a run cannot scan any papers because of an error, it fails before sending an empty email. If part of a run succeeds, the subject is marked **[Incomplete]** and Actions shows a failure. Open the run log to see which stage failed. If you already run the bot via cron, turn off that schedule when switching to Actions to avoid duplicate email.
 
-   ```sh
-    conda env create -f environment.yml
-    conda activate arxivbot
-   ```
-3. **Create a Mailgun account or set up an email server:**
+GitHub can delay scheduled jobs and disables the schedule after 60 days without repository activity in a public repo. Re-enable it on the workflow's Actions page. [GitHub scheduling behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
-    Mailgun has a free plan for a small number of emails sent per month, but you can also use your own email server for this.
+## Run locally
 
-    1. Create a Mailgun Account:
-        - Go to the Mailgun website and sign up for an account.
-        - Follow the instructions to verify your email address and set up your domain.
-    2. Get Your API Key:
-        - Once your account is set up, log in to the Mailgun dashboard.
-        - Navigate to the "API" section.
-        - Copy the "Private API Key" and use it as the EMAIL_PASSWORD in your .env file.
-        - Use your Mailgun domain and email as the EMAIL_FROM.
+Clone the repository and create a Python 3.11 environment:
 
-4. **Generate a Gemini API key:**
+```sh
+git clone https://github.com/vaheta/arxivbot.git
+cd arxivbot
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env_template .env
+```
 
-    The free tier of the Gemini API is enough for daily use with the default models. Check the live quotas for your project at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit).
-    - Go to [Google AI Studio](https://aistudio.google.com) and sign up for an account if you don't already have one.
-    - Press "Get API Key".
-    - Create a new API key.
-    - Copy the API key and use it as the GENAI_API_TOKEN in your .env file.
-
-5. **Set up environment variables:**
-    Add the token and email server info to .env_template file and rename it to .env.
-    ```sh
-    EMAIL_FROM=<your Mailgun or email server email>
-    EMAIL_TO=recipient@example.com
-    EMAIL_SMTP_SERVER=<smtp.mailgun.com or email server smtp>
-    EMAIL_SMTP_PORT=587
-    EMAIL_USERNAME=<your Mailgun or email server email>
-    EMAIL_PASSWORD=<your Mailgun or email server password>
-    GENAI_API_TOKEN=<your Gemini API token>
-    ```
+On Windows, activate the environment with `.venv\Scripts\activate`. For Conda, use `conda env create -f environment.yml` and `conda activate arxivbot` in place of the virtual environment and pip steps. Fill in the same settings from the table above in your local `.env` file.
 
 ## Configuration
 
@@ -102,7 +88,7 @@ Useful flags for testing and tuning:
 ```sh
 python main.py --dry-run              # don't send email; write the digest HTML into logs/ (viewable in a browser, figures included)
 python main.py --limit 10             # only process the first 10 papers
-python main.py --date 'Thu, 2 Jul 2026'  # process a specific listing day
+python main.py --date 'Thu, 2 Jul 2026'  # choose a day still on the recent listing
 ```
 
 The classifier's per-paper decisions and reasoning are written to the log, which makes it easy to spot misclassifications and refine your interests/examples.
@@ -166,7 +152,7 @@ Example runme.bat file content:
 
 ## Dependencies
 
-The dependencies are listed in the environment.yml file and include:
+The hosted job installs from `requirements.txt`. The Conda environment is defined in `environment.yml`. Dependencies include:
 
 - python=3.11
 - requests
